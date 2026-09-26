@@ -18,7 +18,7 @@ app.use(cors());
 
 // Map our site's Hindi category names to NewsAPI's category param.
 const CATEGORY_MAP = {
-  "भारत": { country: "in" },
+  "भारत": { country: "us" },
   "विश्व": { country: "us" }, // NewsAPI has no single "world" endpoint; pick a broad source
   "व्यापार": { country: "in", category: "business" },
   "तकनीक": { country: "in", category: "technology" },
