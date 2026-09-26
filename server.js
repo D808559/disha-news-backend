@@ -11,7 +11,6 @@ const PORT = process.env.PORT || 3000;
 const API_KEY = process.env.NEWS_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-// Cache results for 15 minutes so we don't hammer the news API
 const cache = new NodeCache({ stdTTL: 900 });
 
 app.use(cors());
@@ -24,10 +23,8 @@ const CATEGORY_MAP = {
   "खेल": { country: "in", category: "sports" },
 };
 
-// Rewrites a headline + description in original words using Gemini,
-// so we never publish the source's exact wording.
 async function rewriteWithGemini(title, description) {
-  if (!GEMINI_API_KEY) return { title, description }; // fallback if no key set
+  if (!GEMINI_API_KEY) return { title, description };
 
   try {
     const prompt = `Rewrite this news headline and description in Hindi, in your own original words, keeping only the facts. Do not copy the exact wording. Reply ONLY in this exact format with no extra text:
@@ -41,9 +38,7 @@ Original description: ${description}`;
     const response = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-      }),
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
     });
     const data = await response.json();
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
@@ -57,7 +52,36 @@ Original description: ${description}`;
     };
   } catch (err) {
     console.error("Gemini rewrite failed:", err);
-    return { title, description }; // fallback to original on error
+    return { title, description };
+  }
+}
+
+// Generates an original image for an article using Gemini's image model.
+// Returns a base64 data URI (no external file storage needed).
+async function generateImageWithGemini(title) {
+  if (!GEMINI_API_KEY) return null;
+
+  try {
+    const prompt = `Create a simple, professional news illustration image (no text, no logos, no real people's faces) representing this news topic: ${title}`;
+
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-image:generateContent?key=${GEMINI_API_KEY}`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] }),
+    });
+    const data = await response.json();
+
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    const imagePart = parts.find((p) => p.inlineData);
+    if (!imagePart) return null;
+
+    const mimeType = imagePart.inlineData.mimeType || "image/png";
+    const base64Data = imagePart.inlineData.data;
+    return `data:${mimeType};base64,${base64Data}`;
+  } catch (err) {
+    console.error("Gemini image generation failed:", err);
+    return null;
   }
 }
 
@@ -80,7 +104,7 @@ app.get("/api/news", async (req, res) => {
     const params = new URLSearchParams({
       apiKey: API_KEY,
       country: mapping.country,
-      pageSize: "8",
+      pageSize: "6",
     });
     if (mapping.category) params.set("category", mapping.category);
 
@@ -100,11 +124,17 @@ app.get("/api/news", async (req, res) => {
       publishedAt: a.publishedAt,
     }));
 
-    // Rewrite each article with Gemini (runs in parallel for speed)
+    // Rewrite text and generate an image for each article, in parallel.
     const articles = await Promise.all(
       rawArticles.map(async (a) => {
         const rewritten = await rewriteWithGemini(a.title, a.description);
-        return { ...a, title: rewritten.title, description: rewritten.description };
+        const image = await generateImageWithGemini(rewritten.title);
+        return {
+          ...a,
+          title: rewritten.title,
+          description: rewritten.description,
+          image, // base64 data URI, or null if generation failed
+        };
       })
     );
 
