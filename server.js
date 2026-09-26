@@ -69,7 +69,7 @@ app.get("/api/news", async (req, res) => {
     }));
 
     cache.set(cacheKey, articles);
-    res.json({ source: "live", articles });
+    res.json({ source: "live", articles, debug: { totalResults: data.totalResults, status: data.status, rawCount: (data.articles || []).length } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong fetching news." });
